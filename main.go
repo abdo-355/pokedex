@@ -8,12 +8,15 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/abdo-355/pokedex/internal/pokecache"
 )
 
 type cliCommand struct {
 	name        string
 	description string
-	callback    func(*config) error
+	callback    func(*config, *pokecache.Cache) error
 }
 
 type config struct {
@@ -22,6 +25,8 @@ type config struct {
 
 func main() {
 	scanner := bufio.NewScanner(os.Stdin)
+
+	cache := pokecache.NewCache(7 * time.Second)
 
 	cmds := map[string]cliCommand{
 		"exit": {
@@ -59,7 +64,7 @@ func main() {
 			ci := cleanInput(t)
 
 			if cmd := cmds[strings.ToLower(ci[0])]; cmd.callback != nil {
-				err := cmd.callback(&cfg)
+				err := cmd.callback(&cfg, cache)
 				if err != nil {
 					fmt.Println("Error:", err)
 				}
@@ -71,14 +76,14 @@ func main() {
 	}
 }
 
-func commandExit(c *config) error {
+func commandExit(c *config, cache *pokecache.Cache) error {
 	fmt.Println("Closing the Pokedex... Goodbye!")
 	os.Exit(0)
 
 	return nil
 }
 
-func commandHelp(c *config) error {
+func commandHelp(c *config, cache *pokecache.Cache) error {
 	fmt.Println("Welcome to the Pokedex!")
 	fmt.Println("Usage:")
 	fmt.Println("")
@@ -99,18 +104,12 @@ type apiResponse struct {
 	} `json:"results"`
 }
 
-func commandMap(c *config) error {
+func commandMap(c *config, cache *pokecache.Cache) error {
 	if c.Next == "" {
 		c.Next = "https://pokeapi.co/api/v2/location-area/"
 	}
 
-	res, err := http.Get(c.Next)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-
-	body, err := io.ReadAll(res.Body)
+	body, err := pokeRequest(c.Next, cache)
 	if err != nil {
 		return err
 	}
@@ -134,21 +133,16 @@ func commandMap(c *config) error {
 	return nil
 }
 
-func commandMapb(c *config) error {
+func commandMapb(c *config, cache *pokecache.Cache) error {
 	if c.Previous == "" {
 		c.Previous = "https://pokeapi.co/api/v2/location-area/"
 	}
 
-	res, err := http.Get(c.Previous)
+	body, err := pokeRequest(c.Previous, cache)
 	if err != nil {
 		return err
 	}
-	defer res.Body.Close()
 
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		return err
-	}
 	r := apiResponse{}
 	err = json.Unmarshal(body, &r)
 	if err != nil {
@@ -163,6 +157,28 @@ func commandMapb(c *config) error {
 	}
 
 	return nil
+}
+
+func pokeRequest(url string, cache *pokecache.Cache) ([]byte, error) {
+	cd, cached := cache.Get(url)
+	if cached {
+		return cd, nil
+	}
+
+	res, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	cache.Add(url, body)
+
+	return body, nil
 }
 
 func cleanInput(text string) []string {

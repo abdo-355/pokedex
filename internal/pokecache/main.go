@@ -21,7 +21,7 @@ func NewCache(d time.Duration) *Cache {
 		entries: make(map[string]CacheEntry),
 	}
 
-	nc.reapLoop(d)
+	go nc.reapLoop(d)
 
 	return nc
 }
