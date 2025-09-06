@@ -16,7 +16,7 @@ import (
 type cliCommand struct {
 	name        string
 	description string
-	callback    func(*config, *pokecache.Cache) error
+	callback    func(*config, *pokecache.Cache, string) error
 }
 
 type config struct {
@@ -49,6 +49,11 @@ func main() {
 			description: "Displays the names of the previous 20 location areas in the Pokemon world.",
 			callback:    commandMapb,
 		},
+		"explore": {
+			name:        "explore",
+			description: "explore the pokemon available at a certain location",
+			callback:    commandExplore,
+		},
 	}
 
 	cfg := config{
@@ -64,7 +69,12 @@ func main() {
 			ci := cleanInput(t)
 
 			if cmd := cmds[strings.ToLower(ci[0])]; cmd.callback != nil {
-				err := cmd.callback(&cfg, cache)
+				var err error
+				if len(ci) < 2 {
+					err = cmd.callback(&cfg, cache, "")
+				} else {
+					err = cmd.callback(&cfg, cache, strings.ToLower(ci[1]))
+				}
 				if err != nil {
 					fmt.Println("Error:", err)
 				}
@@ -76,14 +86,14 @@ func main() {
 	}
 }
 
-func commandExit(c *config, cache *pokecache.Cache) error {
+func commandExit(c *config, cache *pokecache.Cache, _ string) error {
 	fmt.Println("Closing the Pokedex... Goodbye!")
 	os.Exit(0)
 
 	return nil
 }
 
-func commandHelp(c *config, cache *pokecache.Cache) error {
+func commandHelp(c *config, cache *pokecache.Cache, _ string) error {
 	fmt.Println("Welcome to the Pokedex!")
 	fmt.Println("Usage:")
 	fmt.Println("")
@@ -104,7 +114,7 @@ type apiResponse struct {
 	} `json:"results"`
 }
 
-func commandMap(c *config, cache *pokecache.Cache) error {
+func commandMap(c *config, cache *pokecache.Cache, _ string) error {
 	if c.Next == "" {
 		c.Next = "https://pokeapi.co/api/v2/location-area/"
 	}
@@ -133,7 +143,7 @@ func commandMap(c *config, cache *pokecache.Cache) error {
 	return nil
 }
 
-func commandMapb(c *config, cache *pokecache.Cache) error {
+func commandMapb(c *config, cache *pokecache.Cache, _ string) error {
 	if c.Previous == "" {
 		c.Previous = "https://pokeapi.co/api/v2/location-area/"
 	}
@@ -196,4 +206,63 @@ func cleanInput(text string) []string {
 	}
 
 	return removedZero
+}
+
+type EncounterResponse struct {
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	GameIndex int    `json:"game_index"`
+	Location  struct {
+		Name string `json:"name"`
+		URL  string `json:"url"`
+	} `json:"location"`
+	EncounterMethodRates []struct {
+		EncounterMethod struct {
+			Name string `json:"name"`
+		} `json:"encounter_method"`
+		VersionDetails []struct {
+			Rate    int `json:"rate"`
+			Version struct {
+				Name string `json:"name"`
+			} `json:"version"`
+		} `json:"version_details"`
+	} `json:"encounter_method_rates"`
+	PokemonEncounters []struct {
+		Pokemon struct {
+			Name string `json:"name"`
+		} `json:"pokemon"`
+		VersionDetails []struct {
+			MaxChance int `json:"max_chance"`
+			Version   struct {
+				Name string `json:"name"`
+			} `json:"version"`
+			EncounterDetails []struct {
+				Chance   int `json:"chance"`
+				MinLevel int `json:"min_level"`
+				MaxLevel int `json:"max_level"`
+			} `json:"encounter_details"`
+		} `json:"version_details"`
+	} `json:"pokemon_encounters"`
+}
+
+func commandExplore(c *config, cache *pokecache.Cache, p string) error {
+	body, err := pokeRequest("https://pokeapi.co/api/v2/location-area/"+p, cache)
+	if err != nil {
+		return err
+	}
+
+	r := EncounterResponse{}
+	err = json.Unmarshal(body, &r)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Exploring %s...\n", p)
+	fmt.Println("Found Pokemon:")
+
+	for _, v := range r.PokemonEncounters {
+		fmt.Printf("- %s\n", v.Pokemon.Name)
+	}
+
+	return nil
 }
