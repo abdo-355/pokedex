@@ -318,9 +318,11 @@ func commandCatch(c *config, cache *pokecache.Cache, p string, caught *map[strin
 	chance := rand.Intn(r.BaseExperience)
 	if _, ok := cm[p]; ok {
 		fmt.Printf("%s was caught!\n", p)
+		fmt.Println("You may now inspect it with the inspect command.")
 	} else if chance > r.BaseExperience/2 {
-		fmt.Printf("%s was caught!\n", p)
 		cm[p] = r
+		fmt.Printf("%s was caught!\n", p)
+		fmt.Println("You may now inspect it with the inspect command.")
 	} else {
 		fmt.Printf("%s escaped!\n", p)
 	}
