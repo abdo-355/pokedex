@@ -66,6 +66,11 @@ func main() {
 			description: "inspect a pokemon in your collection",
 			callback:    commandInspect,
 		},
+		"pokedex": {
+			name:        "pokedex",
+			description: "list all the pokemon you have caught",
+			callback:    commandList,
+		},
 	}
 
 	cfg := config{
@@ -344,6 +349,14 @@ func commandInspect(c *config, cache *pokecache.Cache, p string, caught *map[str
 		}
 	} else {
 		fmt.Println("you have not caught that pokemon")
+	}
+	return nil
+}
+
+func commandList(c *config, cache *pokecache.Cache, _ string, caught *map[string]Pokemon) error {
+	fmt.Println("Your Pokedex:")
+	for k := range *caught {
+		fmt.Println(" - ", k)
 	}
 	return nil
 }
