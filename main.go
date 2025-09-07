@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -16,7 +17,7 @@ import (
 type cliCommand struct {
 	name        string
 	description string
-	callback    func(*config, *pokecache.Cache, string) error
+	callback    func(*config, *pokecache.Cache, string, *map[string]Pokemon) error
 }
 
 type config struct {
@@ -27,6 +28,7 @@ func main() {
 	scanner := bufio.NewScanner(os.Stdin)
 
 	cache := pokecache.NewCache(7 * time.Second)
+	caught := map[string]Pokemon{}
 
 	cmds := map[string]cliCommand{
 		"exit": {
@@ -54,6 +56,16 @@ func main() {
 			description: "explore the pokemon available at a certain location",
 			callback:    commandExplore,
 		},
+		"catch": {
+			name:        "catch",
+			description: "catch a pokemon and add it to your collection",
+			callback:    commandCatch,
+		},
+		"inspect": {
+			name:        "inspect",
+			description: "inspect a pokemon in your collection",
+			callback:    commandInspect,
+		},
 	}
 
 	cfg := config{
@@ -71,9 +83,9 @@ func main() {
 			if cmd := cmds[strings.ToLower(ci[0])]; cmd.callback != nil {
 				var err error
 				if len(ci) < 2 {
-					err = cmd.callback(&cfg, cache, "")
+					err = cmd.callback(&cfg, cache, "", &caught)
 				} else {
-					err = cmd.callback(&cfg, cache, strings.ToLower(ci[1]))
+					err = cmd.callback(&cfg, cache, strings.ToLower(ci[1]), &caught)
 				}
 				if err != nil {
 					fmt.Println("Error:", err)
@@ -86,20 +98,23 @@ func main() {
 	}
 }
 
-func commandExit(c *config, cache *pokecache.Cache, _ string) error {
+func commandExit(c *config, cache *pokecache.Cache, _ string, _ *map[string]Pokemon) error {
 	fmt.Println("Closing the Pokedex... Goodbye!")
 	os.Exit(0)
 
 	return nil
 }
 
-func commandHelp(c *config, cache *pokecache.Cache, _ string) error {
+func commandHelp(c *config, cache *pokecache.Cache, _ string, _ *map[string]Pokemon) error {
 	fmt.Println("Welcome to the Pokedex!")
 	fmt.Println("Usage:")
 	fmt.Println("")
 	fmt.Println("help: Displays a help message")
 	fmt.Println("map: displays the names of 20 location areas in the Pokemon world.")
 	fmt.Println("mapb: displays the names of the previous 20 location areas in the Pokemon world.")
+	fmt.Println("explore <location>: explore the pokemon available at a certain location")
+	fmt.Println("catch <pokemon>: catch a pokemon and add it to your collection")
+	fmt.Println("inspect <pokemon>: inspect a pokemon in your collection")
 	fmt.Println("exit: Exit the Pokedex")
 
 	return nil
@@ -114,7 +129,7 @@ type apiResponse struct {
 	} `json:"results"`
 }
 
-func commandMap(c *config, cache *pokecache.Cache, _ string) error {
+func commandMap(c *config, cache *pokecache.Cache, _ string, _ *map[string]Pokemon) error {
 	if c.Next == "" {
 		c.Next = "https://pokeapi.co/api/v2/location-area/"
 	}
@@ -143,7 +158,7 @@ func commandMap(c *config, cache *pokecache.Cache, _ string) error {
 	return nil
 }
 
-func commandMapb(c *config, cache *pokecache.Cache, _ string) error {
+func commandMapb(c *config, cache *pokecache.Cache, _ string, _ *map[string]Pokemon) error {
 	if c.Previous == "" {
 		c.Previous = "https://pokeapi.co/api/v2/location-area/"
 	}
@@ -245,7 +260,7 @@ type EncounterResponse struct {
 	} `json:"pokemon_encounters"`
 }
 
-func commandExplore(c *config, cache *pokecache.Cache, p string) error {
+func commandExplore(c *config, cache *pokecache.Cache, p string, _ *map[string]Pokemon) error {
 	body, err := pokeRequest("https://pokeapi.co/api/v2/location-area/"+p, cache)
 	if err != nil {
 		return err
@@ -264,5 +279,69 @@ func commandExplore(c *config, cache *pokecache.Cache, p string) error {
 		fmt.Printf("- %s\n", v.Pokemon.Name)
 	}
 
+	return nil
+}
+
+type Pokemon struct {
+	BaseExperience int `json:"base_experience"`
+	Height         int `json:"height"`
+	Weight         int `json:"weight"`
+	Stats          []struct {
+		BaseStat int `json:"base_stat"`
+		Effort   int `json:"effort"`
+		Stat     struct {
+			Name string `json:"name"`
+		} `json:"stat"`
+	} `json:"stats"`
+	Types []struct {
+		Type struct {
+			Name string `json:"name"`
+		} `json:"type"`
+	} `json:"types"`
+}
+
+func commandCatch(c *config, cache *pokecache.Cache, p string, caught *map[string]Pokemon) error {
+	fmt.Printf("Throwing a Pokeball at %s...\n", p)
+
+	body, err := pokeRequest("https://pokeapi.co/api/v2/pokemon/"+p, cache)
+	if err != nil {
+		return err
+	}
+
+	r := Pokemon{}
+	err = json.Unmarshal(body, &r)
+	if err != nil {
+		return err
+	}
+
+	cm := *caught
+	chance := rand.Intn(r.BaseExperience)
+	if _, ok := cm[p]; ok {
+		fmt.Printf("%s was caught!\n", p)
+	} else if chance > r.BaseExperience/2 {
+		fmt.Printf("%s was caught!\n", p)
+		cm[p] = r
+	} else {
+		fmt.Printf("%s escaped!\n", p)
+	}
+	return nil
+}
+
+func commandInspect(c *config, cache *pokecache.Cache, p string, caught *map[string]Pokemon) error {
+	if pok, ok := (*caught)[p]; ok {
+		fmt.Println("Name:", p)
+		fmt.Println("Height:", pok.Height)
+		fmt.Println("Weight:", pok.Weight)
+		fmt.Println("Stats:")
+		for _, v := range pok.Stats {
+			fmt.Printf("  -%s: %d\n", v.Stat.Name, v.BaseStat)
+		}
+		fmt.Println("Types:")
+		for _, v := range pok.Types {
+			fmt.Printf("  - %s\n", v.Type.Name)
+		}
+	} else {
+		fmt.Println("you have not caught that pokemon")
+	}
 	return nil
 }
